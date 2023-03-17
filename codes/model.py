@@ -102,8 +102,11 @@ class TraceModel(nn.Module):
 
         self.out_dim = trace_hiddens[-1]
         assert len(trace_hiddens) == len(trace_kernel_sizes)
-        self.net = ConvNet(1, num_channels=trace_hiddens, kernel_sizes=trace_kernel_sizes, 
-                    dev=device, dropout=trace_dropout)
+        trace_dropout = 0
+        #self.net = ConvNet(1, num_channels=trace_hiddens, kernel_sizes=trace_kernel_sizes,
+        #            dev=device, dropout=trace_dropout)
+        self.net = ConvNet(1, num_channels=trace_hiddens, kernel_sizes=trace_kernel_sizes,
+                           dev=device)
 
         self.self_attn = self_attn
         if self_attn:
@@ -111,6 +114,7 @@ class TraceModel(nn.Module):
             self.attn_layer = SelfAttention(self.out_dim, chunk_lenth)
 
     def forward(self, x: torch.tensor): #[bz, T, 1]
+        #print(x.size())
         hidden_states = self.net(x)
         if self.self_attn: 
             return self.attn_layer(hidden_states)
@@ -124,8 +128,10 @@ class MetricModel(nn.Module):
         in_dim = metric_num
 
         assert len(metric_hiddens) == len(metric_kernel_sizes)
-        self.net = ConvNet(num_inputs=in_dim, num_channels=metric_hiddens, kernel_sizes=metric_kernel_sizes, 
-                            dev=device, dropout=metric_dropout)
+        #self.net = ConvNet(num_inputs=in_dim, num_channels=metric_hiddens, kernel_sizes=metric_kernel_sizes,
+        #                    dev=device, dropout=metric_dropout)
+        self.net = ConvNet(num_inputs=in_dim, num_channels=metric_hiddens, kernel_sizes=metric_kernel_sizes,
+                           dev=device)
 
         self.self_attn = self_attn
         if self_attn:
@@ -175,6 +181,7 @@ class MultiSourceEncoder(nn.Module):
         self.feat_out_dim = self.status_model.out_dim
     
     def forward(self, graph):
+        #print("trace size:",graph.ndata["traces"].size())
         trace_embedding = self.trace_model(graph.ndata["traces"]) #[bz*node_num, T, trace_dim]
         log_embedding = self.log_model(graph.ndata["logs"]) #[bz*node_num, log_dim]
         metric_embedding = self.metric_model(graph.ndata["metrics"]) #[bz*node_num, metric_dim]
@@ -216,6 +223,7 @@ class MainModel(nn.Module):
 
     def forward(self, graph, fault_indexs):
         batch_size = graph.batch_size
+        #print('batch_size:',batch_size)
         embeddings = self.encoder(graph) #[bz, feat_out_dim]
         
         y_prob = torch.zeros((batch_size, self.node_num)).to(self.device) 
@@ -227,10 +235,15 @@ class MainModel(nn.Module):
             y_anomaly[i] = int(fault_indexs[i] > -1)
 
 
-        locate_logits = self.locator(embeddings)
-        locate_loss = self.locator_criterion(locate_logits, fault_indexs.to(self.device))
-        detect_logits = self.detector(embeddings)
-        detect_loss = self.decoder_criterion(detect_logits, y_anomaly) 
+       # locate_logits = self.locator(embeddings)
+       # locate_loss = self.locator_criterion(locate_logits, fault_indexs.to(self.device))
+        locate_logits = self.localizer(embeddings)
+        locate_loss = self.localizer_criterion(locate_logits, fault_indexs.to(self.device))
+
+        # detect_logits = self.detector(embeddings)
+        # detect_loss = self.decoder_criterion(detect_logits, y_anomaly)
+        detect_logits = self.detecter(embeddings)
+        detect_loss = self.detecter_criterion(detect_logits, y_anomaly)
         loss = self.alpha * detect_loss + (1-self.alpha) * locate_loss
 
         node_probs = self.get_prob(locate_logits.detach()).cpu().numpy()

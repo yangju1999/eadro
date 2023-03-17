@@ -12,6 +12,7 @@ class chunkDataset(Dataset): #[node_num, T, else]
             graph.ndata["logs"] = torch.FloatTensor(chunk["logs"])
             graph.ndata["metrics"] = torch.FloatTensor(chunk["metrics"])
             graph.ndata["traces"] = torch.FloatTensor(chunk["traces"])
+            #print("chunk traces size:",chunk["traces"])
             self.data.append((graph, chunk["culprit"]))
                 
     def __len__(self):
@@ -73,7 +74,7 @@ def collate(data):
     return batched_graph , torch.tensor(labels)
 
 def run(evaluation_epoch=10):
-    data_dir = os.path.join("../chunks", params["data"])
+    data_dir = os.path.join("./chunks", params["data"])
 
     metadata = read_json(os.path.join(data_dir, "metadata.json"))
     event_num, node_num, metric_num =  metadata["event_num"], metadata["node_num"], metadata["metric_num"]
@@ -86,9 +87,11 @@ def run(evaluation_epoch=10):
 
     train_chunks, test_chunks = load_chunks(data_dir)
 
-    train_data = chunkDataset(train_chunks, node_num)
-    test_data = chunkDataset(test_chunks, node_num)
-    
+    # train_data = chunkDataset(train_chunks, node_num,list(zip(metadata["edges"][0],metadata["edges"][1])))
+    # test_data = chunkDataset(test_chunks, node_num,list(zip(metadata["edges"][0],metadata["edges"][1])))
+    train_data = chunkDataset(train_chunks, node_num,(metadata["edges"][0],metadata["edges"][1]))
+    test_data = chunkDataset(test_chunks, node_num,(metadata["edges"][0],metadata["edges"][1]))
+
     train_dl = DataLoader(train_data, batch_size=params["batch_size"], shuffle=True, collate_fn=collate, pin_memory=True)
     test_dl = DataLoader(test_data, batch_size=params["batch_size"], shuffle=False, collate_fn=collate, pin_memory=True)
 

@@ -8,6 +8,7 @@ import logging
 
 from model import MainModel
 from sklearn.metrics import ndcg_score
+import numpy as np
 
 class BaseModel(nn.Module):
     def __init__(self, event_num, metric_num, node_num, device, lr=1e-3, epoches=50, patience=5, result_dir='./', hash_id=None, **kwargs):

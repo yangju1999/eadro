@@ -1,0 +1,5 @@
+codes/chunks/
+codes/preprocess/parsed_data/
+codes/preprocess/data_set/
+result/
+__pycache__

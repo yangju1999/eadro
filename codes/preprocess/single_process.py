@@ -87,7 +87,8 @@ def deal_traces(intervals, info, idx, name, chunk_lenth):
     print("*** Dealing with traces...")
     traces = read_json(os.path.join("./parsed_data", name, "traces"+idx+".json"))
     invocations = [] # the number of invocations
-    latency = np.zeros((len(intervals), info.node_num, chunk_lenth, 2))
+    #latency = np.zeros((len(intervals), info.node_num, chunk_lenth, 2))
+    latency = np.zeros((len(intervals), info.node_num, chunk_lenth, 1))
 
     for chunk_idx, (s, e) in enumerate(intervals):
         invok = {}

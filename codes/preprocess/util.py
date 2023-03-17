@@ -72,7 +72,8 @@ def read_json(filepath):
         assert filepath.endswith('.json')
         with open(filepath, 'r') as f:
             return json.loads(f.read())
-    else: 
+    else:
+        print("file path:",filepath)
         raiseExceptions("File path "+filepath+" not exists!")
         return
 
