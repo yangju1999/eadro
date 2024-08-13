@@ -9,6 +9,8 @@ import logging
 from model import MainModel
 from sklearn.metrics import ndcg_score
 import numpy as np
+import pdb 
+from tqdm import tqdm 
 
 class BaseModel(nn.Module):
     def __init__(self, event_num, metric_num, node_num, device, lr=1e-3, epoches=50, patience=5, result_dir='./', hash_id=None, **kwargs):
@@ -25,13 +27,15 @@ class BaseModel(nn.Module):
     
     def evaluate(self, test_loader, datatype="Test"):
         self.model.eval()
-        hrs, ndcgs = np.zeros(5), np.zeros(5)
+        hrs = np.zeros(5)
         TP, FP, FN = 0, 0, 0
         batch_cnt, epoch_loss = 0, 0.0 
         
         with torch.no_grad():
-            for graph, ground_truths in test_loader:
+            for graph, ground_truths in tqdm(test_loader, desc="Testing progress"):
+                
                 res = self.model.forward(graph.to(self.device), ground_truths)
+                pdb.set_trace()
                 for idx, faulty_nodes in enumerate(res["y_pred"]):
                     culprit = ground_truths[idx].item()
                     if culprit == -1:
@@ -44,7 +48,7 @@ class BaseModel(nn.Module):
                             rank = list(faulty_nodes).index(culprit)
                             for j in range(5):
                                 hrs[j] += int(rank <= j)
-                                ndcgs[j] += ndcg_score([res["y_prob"][idx]], [res["pred_prob"][idx]], k=j+1)
+                                #ndcgs[j] += ndcg_score([res["y_prob"][idx]], [res["pred_prob"][idx]], k=j+1)
                 epoch_loss += res["loss"].item()
                 batch_cnt += 1
         
@@ -56,7 +60,7 @@ class BaseModel(nn.Module):
         
         for j in [1, 3, 5]:
             eval_results["HR@"+str(j)] = hrs[j-1]*1.0/pos
-            eval_results["ndcg@"+str(j)] = ndcgs[j-1]*1.0/pos
+            #eval_results["ndcg@"+str(j)] = ndcgs[j-1]*1.0/pos
             
         logging.info("{} -- {}".format(datatype, ", ".join([k+": "+str(f"{v:.4f}") for k, v in eval_results.items()])))
 
@@ -73,7 +77,7 @@ class BaseModel(nn.Module):
             self.model.train()
             batch_cnt, epoch_loss = 0, 0.0
             epoch_time_start = time.time()
-            for graph, label in train_loader:
+            for graph, label in tqdm(train_loader, desc="Training progress"):
                 optimizer.zero_grad()
                 loss = self.model.forward(graph.to(self.device), label)['loss']
                 loss.backward()
@@ -123,3 +127,4 @@ class BaseModel(nn.Module):
             torch.save(state, file, _use_new_zipfile_serialization=False)
         except:
             torch.save(state, file)
+    
