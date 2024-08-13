@@ -102,4 +102,4 @@ def run(evaluation_epoch=10):
     logging.info("Current hash_id {}".format(hash_id))
 
 if "__main__" == __name__:
-    run()
+    run(1)

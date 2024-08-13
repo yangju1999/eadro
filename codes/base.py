@@ -35,7 +35,6 @@ class BaseModel(nn.Module):
             for graph, ground_truths in tqdm(test_loader, desc="Testing progress"):
                 
                 res = self.model.forward(graph.to(self.device), ground_truths)
-                pdb.set_trace()
                 for idx, faulty_nodes in enumerate(res["y_pred"]):
                     culprit = ground_truths[idx].item()
                     if culprit == -1:
