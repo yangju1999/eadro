@@ -13,7 +13,7 @@ import pdb
 from tqdm import tqdm 
 
 class BaseModel(nn.Module):
-    def __init__(self, event_num, metric_num, node_num, device, lr=1e-3, epoches=50, patience=5, result_dir='./', hash_id=None, **kwargs):
+    def __init__(self, event_num, metric_num, node_num, device, normal_avgerage, lr=1e-3, epoches=50, patience=5, result_dir='./', hash_id=None, **kwargs):
         super(BaseModel, self).__init__()
         
         self.epoches = epoches
@@ -22,13 +22,13 @@ class BaseModel(nn.Module):
         self.device = device
 
         self.model_save_dir = os.path.join(result_dir, hash_id)
-        self.model = MainModel(event_num, metric_num, node_num, device, **kwargs)
+        self.model = MainModel(event_num, metric_num, node_num, device, normal_avgerage, **kwargs)
         self.model.to(device)
     
     def evaluate(self, test_loader, datatype="Test"):
         self.model.eval()
         hrs = np.zeros(5)
-        TP, FP, FN = 0, 0, 0
+        TP, FP, FN, TN = 0, 0, 0, 0 
         batch_cnt, epoch_loss = 0, 0.0 
         
         with torch.no_grad():
@@ -38,7 +38,7 @@ class BaseModel(nn.Module):
                 for idx, faulty_nodes in enumerate(res["y_pred"]):
                     culprit = ground_truths[idx].item()
                     if culprit == -1:
-                        if faulty_nodes[0] == -1: TP+=1
+                        if faulty_nodes[0] == -1: TN+=1
                         else: FP += 1
                     else:
                         if faulty_nodes[0] == -1: FN+=1
@@ -52,10 +52,13 @@ class BaseModel(nn.Module):
                 batch_cnt += 1
         
         pos = TP+FN
+        recall = TP*1.0/pos if pos > 0 else 0
+        precision = TP*1.0/(TP+FP) if (TP+FP) > 0 else 0
+        f1 = (2.0*recall*precision)/(precision+recall) if (precision+recall) > 0 else 0
         eval_results = {
-                "F1": TP*2.0/(TP+FP+pos) if (TP+FP+pos)>0 else 0,
-                "Rec": TP*1.0/pos if pos > 0 else 0,
-                "Pre": TP*1.0/(TP+FP) if (TP+FP) > 0 else 0}
+                "F1": f1,
+                "Rec": recall,
+                "Pre": precision}
         
         for j in [1, 3, 5]:
             eval_results["HR@"+str(j)] = hrs[j-1]*1.0/pos

@@ -92,15 +92,43 @@ def run(evaluation_epoch=10):
     train_data = chunkDataset(train_chunks, node_num,(metadata["edges"][0],metadata["edges"][1]))
     test_data = chunkDataset(test_chunks, node_num,(metadata["edges"][0],metadata["edges"][1]))
 
+    normal_avg = normal_status_average(train_data)
+
     train_dl = DataLoader(train_data, batch_size=params["batch_size"], shuffle=True, collate_fn=collate, pin_memory=True)
     test_dl = DataLoader(test_data, batch_size=params["batch_size"], shuffle=False, collate_fn=collate, pin_memory=True)
 
-    model = BaseModel(event_num, metric_num, node_num, device, **params)
+    model = BaseModel(event_num, metric_num, node_num, device, normal_avg, **params)
     #scores, converge = model.fit(train_dl, test_dl, evaluation_epoch=evaluation_epoch)
     model.load_model("../result/ed68842c/model.ckpt")
     eval_result = model.evaluate(test_dl, datatype="Test")
+    eval_result = model.evaluate(train_dl, datatype="Train")
     # dump_scores(params["result_dir"], hash_id, scores, converge)
     # logging.info("Current hash_id {}".format(hash_id))
+
+def normal_status_average(train_data):
+    result = {}
+    sum_logs = None 
+    sum_metrics = None 
+    sum_traces = None 
+    normal_count = 0 
+    for data in train_data:
+        if data[1] == -1: #anomaly가 없는 경우 normal 상태의 graph의 평균값을 얻기 위함
+            normal_count += 1
+            graph = data[0]
+            if sum_logs is None:
+                sum_logs = graph.ndata['logs']
+                sum_metrics = graph.ndata['metrics']
+                sum_traces = graph.ndata['traces']
+            else:
+                sum_logs += graph.ndata['logs']
+                sum_metrics += graph.ndata['metrics']
+                sum_traces += graph.ndata['traces']
+
+    result['avg_logs'] = sum_logs / normal_count
+    result['avg_metrics'] = sum_metrics / normal_count
+    result['avg_traces'] = sum_traces / normal_count
+
+    return result 
 
 if "__main__" == __name__:
     run()

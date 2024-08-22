@@ -4,6 +4,7 @@ from dgl.nn.pytorch import GATv2Conv
 from dgl.nn import GlobalAttentionPooling
 import dgl 
 import pdb 
+import copy
 
 class GraphModel(nn.Module):
     def __init__(self, in_dim, graph_hiddens=[64, 128], device='cpu', attn_head=4, activation=0.2, **kwargs):
@@ -202,23 +203,25 @@ class FullyConnected(nn.Module):
             layers += [nn.Linear(input_size, hidden), nn.ReLU()]
         layers += [nn.Linear(linear_sizes[-1], out_dim)]
         self.net = nn.Sequential(*layers)
+        self.activation = nn.Sigmoid() 
 
     def forward(self, x: torch.Tensor): #[batch_size, in_dim]
-        return self.net(x)
+        return self.activation(self.net(x)).squeeze() 
 
 import numpy as np
 class MainModel(nn.Module):
-    def __init__(self, event_num, metric_num, node_num, device, alpha=0.5, debug=False, **kwargs):
+    def __init__(self, event_num, metric_num, node_num, device, normal_average, alpha=0.5, debug=False, **kwargs):
         super(MainModel, self).__init__()
 
+        self.normal_average = normal_average
         self.device = device
         self.node_num = node_num
         self.alpha = alpha
 
         self.encoder = MultiSourceEncoder(event_num, metric_num, node_num, device, debug=debug, alpha=alpha, **kwargs)
 
-        self.detecter = FullyConnected(self.encoder.feat_out_dim, 2, kwargs['detect_hiddens']).to(device)
-        self.detecter_criterion = nn.CrossEntropyLoss()
+        self.detecter = FullyConnected(self.encoder.feat_out_dim, 1, kwargs['detect_hiddens']).to(device)
+        self.detecter_criterion = nn.BCELoss()
         #self.localizer = FullyConnected(self.encoder.feat_out_dim, node_num, kwargs['locate_hiddens']).to(device)
         #self.localizer_criterion = nn.CrossEntropyLoss(ignore_index=-1)
         #self.get_prob = nn.Softmax(dim=-1)
@@ -243,53 +246,76 @@ class MainModel(nn.Module):
         #locate_loss = self.localizer_criterion(locate_logits, fault_indexs.to(self.device))
 
         detect_logits = self.detecter(embeddings)
-        detect_loss = self.detecter_criterion(detect_logits, y_anomaly)
+        detect_loss = self.detecter_criterion(detect_logits, y_anomaly.float())
 
         #loss = self.alpha * detect_loss + (1-self.alpha) * locate_loss
         loss = detect_loss
         #node_probs: 각 노드(마이크로서비스)들의 RC일 확률 
         #node_probs = self.get_prob(locate_logits.detach()).cpu().numpy()
-        y_pred = self.inference(batch_size, graph, detect_logits)
+        
+        y_pred, diff_lists, anomaly_indexs = self.inference(batch_size, graph, detect_logits)
         
         return {'loss': loss, 'y_pred': y_pred, 'y_prob': y_prob.detach().cpu().numpy()} #'pred_prob': node_probs}
         
     def inference(self, batch_size, graph, detect_logits): 
         y_pred = []
+        diff_lists = []
+        anomaly_indexs = []
+        detect_pred = torch.where(detect_logits > 0.9, torch.tensor(1), torch.tensor(0))
         for i in range(batch_size):
-            detect_pred = detect_logits.detach().cpu().numpy().argmax(axis=1).squeeze()
             graph_list = dgl.unbatch(graph)
 
             if detect_pred[i] < 1: 
                 y_pred.append([-1]) #anomaly 가 없으면 -1 값 
+
             else: #anomaly 가 있다면?
+                anomaly_indexs.append(i)
                 diff_list = []
                 current_graph = graph_list[i]
                 for j in range(self.node_num): # node 하나씩 제거해보기 
-                    masked_graph = self.masking(current_graph, j) #노드 하나씩 제거하는 코드, 단 여기서 graph[i]는 batch 내에서 i번째 graph 를 의미함 
+                    masked_graph = self.masking(current_graph, j) #노드 하나씩 제거하는 코드
                     masked_embeddings = self.encoder(masked_graph)
                     masked_detect_logit = self.detecter(masked_embeddings)
 
-                    diff = detect_logits[i][1] - masked_detect_logit[0][1] #original anomaly 확률 값 - masked anomaly 확률값의 차이, 이것이 클수록 mask된 노드가 RC일 확률 높음
+                    diff = detect_logits[i] - masked_detect_logit #original anomaly 확률 값 - masked anomaly 확률값의 차이, 이것이 클수록 mask된 노드가 RC일 확률 높음
                     diff_list.append(diff.item())
+            
 
                 temp = np.argsort(diff_list)[::-1]
-
+                diff_lists.append(diff_list)
                 y_pred.append(temp)
 
 
-        return y_pred
-
-# j 번째 node 삭제와, 해당 node와 관련된 edge들까지 삭제해야 함 
-    def masking(self, graph, node_index):
+        return y_pred, diff_lists, anomaly_indexs
     
-        #j 번째 node 삭제 
-        unmaksed_index = list(range(self.node_num))
-        unmaksed_index.remove(node_index) 
+# j 번째 node feature를 normal state일때의 average값으로 변경
+    def masking(self, graph, node_index):
+        # 그래프 구조만 복제
+        subgraph = graph.clone()
 
-        # 남은 노드들로부터 새로운 서브그래프를 생성합니다.
-        subgraph = dgl.node_subgraph(graph, unmaksed_index)
+        # 각 데이터 항목에 대해 깊은 복사 수행
+        subgraph.ndata['logs'] = copy.deepcopy(graph.ndata['logs'])
+        subgraph.ndata['metrics'] = copy.deepcopy(graph.ndata['metrics'])
+        subgraph.ndata['traces'] = copy.deepcopy(graph.ndata['traces'])
+
+        # 변경하고자 하는 노드의 데이터를 업데이트
+        subgraph.ndata['logs'][node_index] = self.normal_average['avg_logs'][node_index].clone()
+        subgraph.ndata['metrics'][node_index] = self.normal_average['avg_metrics'][node_index].clone()
+        subgraph.ndata['traces'][node_index] = self.normal_average['avg_traces'][node_index].clone()
 
         return subgraph
+    
+
+# # j 번째 node 삭제와, 해당 node와 관련된 edge들까지 삭제해야 함 
+#     def masking(self, graph, node_index):
+#         #j 번째 node 삭제 
+#         unmaksed_index = list(range(self.node_num))
+#         unmaksed_index.remove(node_index) 
+
+#         # 남은 노드들로부터 새로운 서브그래프를 생성합니다.
+#         subgraph = dgl.node_subgraph(graph, unmaksed_index)
+
+#         return subgraph
 
 
     
